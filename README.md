@@ -2,7 +2,7 @@
 This repository contains source code that was used to control the lighting on an art installation called the Harmonic Throne.
 
 # What
-The harmonic throne has 11 resonator tubes. In front of each resonator tube is a metal plate tuned to a harmonic frequency. When the plate is struck by a mallet the sound enters a resonator tube[^1] that is the length of a standing wave for the corresponding frequency. The central and tallest tube is 60hz, and each tube increments by 30hz to the smallest tube at 360hz.
+The harmonic throne has 11 resonator tubes. In front of each resonator tube is a metal plate tuned to a harmonic frequency. When the plate is struck by a mallet the sound enters a resonator tube[^1] that is the length of a standing wave for the harmonic frequency of the metal plate. The central and tallest tube is 60hz, and each tube increments by 30hz to the smallest tube at 360hz.
 
 At the top of each tube is an arduino nano, a max4466 electret microphone with a hand soldered bandpass filter, and 14 WS2812B LEDs. They are all wired to a central 12v battery through a 12v to 5v buck converter. The nanos are stored in a 3d printed enclosure and the microphones are sealed with sugru.
 
@@ -15,4 +15,5 @@ The hue of the LEDs gradually shifts through all possible values (0-255) over th
 
 The code that runs on each arduino is identical except for the tone number constant, and the possible change of the wiring pin for the microphone or LED strip.
 
-[^1]: A resonator tube is a PVC pipe, which can easily be seen in the picture on the tallest tube.
+[^1]: A resonator tube is a PVC pipe, which can easily be seen in the picture on the center 60hz tube.
+<img src="https://raw.githubusercontent.com/irdan/harmonic-throne/main/harmonic-throne.jpg" height="806" width="605" >
