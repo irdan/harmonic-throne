@@ -15,5 +15,7 @@ The hue of the LEDs gradually shifts through all possible values (0-255) over th
 
 The code that runs on each arduino is identical except for the tone number constant, and the possible change of the wiring pin for the microphone or LED strip.
 
+The `visualize-histogram.py` file reads the output of the `histogramFFTResults` function that is sent over the USB serial connection. It then uses matplotlib to display an updating histogram of the FFT output. It was used to visualize the FFT calculation and microphone input during development and testing.
+
 [^1]: A resonator tube is a PVC pipe, which can easily be seen in the picture on the center 60hz tube.
 <img src="https://raw.githubusercontent.com/irdan/harmonic-throne/main/harmonic-throne.jpg" height="806" width="605" >
