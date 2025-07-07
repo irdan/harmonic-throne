@@ -20,8 +20,6 @@ const int micPin = A6;  // Microphone connected to analog pin A6
  * Begin variables to change light behavior
  *  keep the same for all resonator tubes 
  */
-const int seconds_in_30_min = 1800;
-const int hueTime = seconds_in_30_min * (1000 / 256); // 1000 microseconds, 256 hues. Parenthesis to not overflow
 const double alpha = 0.7; // between 0 and 1. Using 0.1 is slow, to react, 0.8 very fast, but less smooth
 int maxMagnitude = 0; // Dynamically tracks the maxMagnitude. Tracks the max for that microphone
 const int minMagnitude = 200; // The mininum magnitude we want to take action from
@@ -55,8 +53,36 @@ volatile uint8_t sampleCounter = 0; // Track number of samples taken
 volatile bool sampleCompleteFlag = false; // Flag to indicate it is time to process samples
 volatile unsigned long lastSampleMicros = 0; // track time of last sample
 
-// Track hue. Increment gradually with an interrupt
-volatile uint8_t hue = 0;
+/* Color Variables
+  We use an interrupt to increment a the color_frame variable.
+
+  The colorFrameDuration, determines how many ms a frame takes.
+      Slows the entire animation.
+
+  The stepCountTotal is the number of frames to iterate through.
+      This determines the number of frames that a cycle takes.
+      A cycle is shifting from one hue/sat value to another.
+      More steps = smoother, longer transition
+      Fewer steps = abrupt, short transition
+
+  The hueOffests and satOffsets act as a list of variances from
+      the main color or hue value - currently 42 and 255
+      respectively. The next cycle target is randomly selected
+      from these lists at the end of a cycle.
+*/
+const int colorFrameDuration = 28; // How long between updating the color_frame value, in ms
+const uint8_t goldHue = 42;
+const int8_t hueOffsets[] = { 0, 5, 7, 11, -5, -7, -11}; // variance from gold, order is irrelevant
+const int8_t satOffsets[] = { 0, -5, -10, -15, -20, -25, -30, 0, -30, 0, -30 }; // variance from 255, order is irrelevant
+
+volatile uint16_t color_frame = 0; // incremented via timer ISR
+uint8_t targetHue = goldHue; // track target hue within a variance, updates every 'cycle'
+uint8_t targetSat = 255; // track target sat within a variance, updates every 'cycle'
+uint8_t previousTargetHue = goldHue; // tracks previous, used in the `map` to determine step size
+uint8_t previousTargetSat = 255; // tracks previous, used in the `map` to determine step size
+uint8_t stepCountTotal = 20; // how many steps to take per cycle.
+uint8_t currentStep = 0; // tracks the state of current step
+
 
 /* Compile time validation of constants */
 static_assert( toneNumber > 1 && toneNumber < 13, "tone must be between 2 and 12 inclusive");
@@ -73,7 +99,7 @@ void setup() {
 
   delay(1000 * toneNumber); // Stagger startup so that not all 11 microcontrollers start at once
   FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
-  fill_solid(leds, NUM_LEDS, CHSV(hue, 255, 255));
+  fill_solid(leds, NUM_LEDS, CHSV(42, 255, 255));
   FastLED.show();
 
   toneSignal = analogRead(micPin); // init for later user in EMA
@@ -81,7 +107,7 @@ void setup() {
   Timer1.initialize(1000000 / samplingFrequency); // Set timer to trigger at the desired sampling frequency
   Timer1.attachInterrupt(timerIsr);
 
-  MsTimer2::set(hueTime, hueIsr); // This increments the color about every 7 seconds, or 0-255 in 30 minutes
+  MsTimer2::set(colorFrameDuration, colorIsr); // This increments the color_frame every duration time.
   MsTimer2::start();
   
 }
@@ -123,11 +149,11 @@ void loop() {
   }
 }
 
-void hueIsr(){
+void colorIsr(){
   /*
    * Increment the hue. Don't worry about overflow since we use uint8_t
    */
-   hue++;
+   color_frame++;
 }
 
 void timerIsr() {
@@ -194,9 +220,39 @@ uint8_t getBrightness(){
   return getScalePosition(toneSignal);
 }
 
+uint8_t getHue(uint8_t currentStep){
+  uint8_t nextHue = (uint8_t) map(currentStep, 0, stepCountTotal, previousTargetHue, targetHue);
+
+  if (currentStep == stepCountTotal - 1) {
+    previousTargetHue = targetHue;
+    targetHue = goldHue + hueOffsets[random(0,7)];
+  }
+
+  return nextHue;
+}
+
+uint8_t getSaturation(uint8_t currentStep){
+  uint8_t nextSat = (uint8_t) map(currentStep, 0, stepCountTotal, previousTargetSat, targetSat);
+
+  if (currentStep == stepCountTotal - 1){
+    previousTargetSat = targetSat;
+    targetSat = 255 + satOffsets[random(0,11)];
+  }
+
+  return nextSat;
+}
 
 void processFFTResults(){
   uint8_t brightness = getBrightness();
+  uint8_t hue = 42;
+  uint8_t saturation = 255;
+
+  Serial.println(brightness);
+  if (brightness >= 240) { // only show shimmer animation when at high brightness
+    currentStep = color_frame % stepCountTotal;
+    hue = getHue(currentStep);
+    saturation = getSaturation(currentStep);
+  }
 
   while (micros() - lastSampleMicros < 200){
     // All interrupts are disabled by FastLED when updating LED properties
@@ -205,7 +261,7 @@ void processFFTResults(){
     // this empty loop delay ensures fft samples are evenly spaced
   }
 
-  fill_solid(leds, NUM_LEDS, CHSV(hue, 255, brightness));
+  fill_solid(leds, NUM_LEDS, CHSV(hue, saturation, brightness));
   FastLED.show();
 }
 
@@ -223,15 +279,21 @@ void histogramFFTResults(){
   /* 
    *  Produce serial output for parsing by the companion python script
    */
+  String output = "";
   for (uint8_t i = 0; i < sampleSize / 2; i++) {
-    Serial.print("(");
-    Serial.print((i * samplingFrequency) / sampleSize, 1);
-    Serial.print(",");
-    Serial.print(vReal[i], 1);
-    Serial.print(")");
+    if (isnan(vReal[i]) or !isfinite(vReal[i])) {
+      continue;
+    }
+    output += "(";
+    output += String((i * samplingFrequency) / sampleSize, 1);
+    output += ",";
+    output += String(vReal[i], 0);
+    output += ")";
+
     if (i < (sampleSize / 2)- 1) {
-      Serial.print(",");
+      output += ",";
     }
   }
-  Serial.println();
+  Serial.println(output);
 }
+
